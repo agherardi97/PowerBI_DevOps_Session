@@ -1,0 +1,35 @@
+[
+    {
+        "ID": "NAME_MEASURE_NAMING_CONVENTION",
+        "Name": "Measure Naming Convention",
+        "Category": "Naming",
+        "Description": "Ensure that all visible measures begin with one of the allowed prefixes: total_, count_, max_, or min_. This promotes consistency and clarity in measure naming.",
+        "Severity": 3,
+        "Scope": "Measure",
+        "Expression": "IsVisible and not RegEx.IsMatch(Name, \"^(total_|count_|max_|min_)\", \"IgnoreCase\")",
+        "CompatibilityLevel":  1200,
+        "Source":  "standard\\DAX Expressions"
+    },
+    {
+        "ID": "DAX_MEASURE_TODO",
+        "Name": "Measure Contains TODO",
+        "Category": "DAX Expressions",
+        "Description": "Measures that contain the placeholder 'TODO' in their expression indicate incomplete work and should be reviewed and finalized.",
+        "Severity": 3,
+        "Scope": "Measure",
+        "Expression": "IsVisible and Expression.Contains(\"TODO\")",
+        "CompatibilityLevel":  1200,
+        "Source":  "standard\\DAX Expressions"
+    },
+    {
+        "ID": "DAX_DUPLICATE_MEASURE_CODE",
+        "Name": "Duplicate Measure Code",
+        "Category": "DAX Expressions",
+        "Description": "Measures that have identical DAX expressions but different names indicate duplicate logic. Consolidate these measures to avoid redundancy and potential maintenance issues.",
+        "Severity": 3,
+        "Scope": "Measure",
+        "Expression": "Model.AllMeasures.Where(Expression == outerIt.Expression and Name <> outerIt.Name).Any()",
+        "CompatibilityLevel":  1200,
+        "Source":  "standard\\DAX Expressions"
+    }
+]

@@ -1,0 +1,131 @@
+trigger:
+  none
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - '**/*.bim'
+      - '**/*.pbidataset'
+      - '**/*.pbism'
+      - '**/*.tmdl'
+
+pool:
+  vmImage: 'windows-latest'
+
+stages:
+- stage: Build
+  displayName: 'Build and Test Datasets'
+  jobs:
+  - job: Build_Datasets
+    displayName: 'Build and Test Datasets Job'
+    steps:
+      # 1) Checkout the current repo so we have the code locally.
+      - checkout: self
+        path: 'self'
+        persistCredentials: true
+        fetchDepth: 0
+
+      # 2) Identify changed dataset files by comparing HEAD to origin/main.
+      - task: PowerShell@2
+        displayName: 'Identify changed dataset files'
+        inputs:
+          targetType: inline
+          script: |
+            cd "$(Build.SourcesDirectory)"
+            Write-Host "##[section]Comparing HEAD with origin/main to find changed dataset files..."
+            git fetch --all
+            $changedFiles = git diff --name-only HEAD origin/main
+
+            # Filter for files with desired extensions.
+            $filteredFiles = $changedFiles | Where-Object {
+              $_ -like '*.bim' -or $_ -like '*.pbidataset' -or $_ -like '*.pbism' -or $_ -like '*.tmdl'
+            }
+
+            if ($filteredFiles) {
+                Write-Host "##[section]Found dataset files in this PR:"
+                $filteredFiles | ForEach-Object { Write-Host " - $_" }
+                $modelFiles = @()
+                foreach ($file in $filteredFiles) {
+                    # If a .tmdl file is changed, extract the root folder and build the model file path.
+                    if ($file -like '*.tmdl') {
+                        # Assume the root folder ends with .SemanticModel
+                        if ($file -match '^(.*\.SemanticModel)') {
+                            $modelFolder = $matches[1]
+                            # Build the path to the model file: <modelFolder>\definition\model.tmdl
+                            $modelFile = Join-Path $modelFolder "definition\model.tmdl"
+                            Write-Host "Detected model file for tmdl change: $modelFile"
+                            $modelFiles += $modelFile
+                        }
+                        else {
+                            Write-Host "Could not extract model folder from $file"
+                        }
+                    }
+                    else {
+                        # For other file types, use the file as is.
+                        $modelFiles += $file
+                    }
+                }
+                # Remove duplicates in case multiple files belong to the same model.
+                $modelFiles = $modelFiles | Sort-Object -Unique
+                Write-Host "##[section]Models to check: $($modelFiles -join ';')"
+                Write-Host "##vso[task.setvariable variable=DatasetFiles]$($modelFiles -join ';')"
+            }
+            else {
+                Write-Host "No dataset files changed."
+                Write-Host "##vso[task.setvariable variable=DatasetFiles]NoFiles"
+            }
+
+      # 3) Download Tabular Editor (portable) and the default BPA rules.
+      - task: PowerShell@2
+        displayName: 'Download Tabular Editor and Default BPA Rules'
+        condition: and(succeeded(), ne(variables['DatasetFiles'], 'NoFiles'))
+        inputs:
+          targetType: inline
+          script: |
+            $path = "$(Build.SourcesDirectory)"
+            $tempPath = Join-Path $path '_temp'
+            $toolPath = Join-Path $path '_tools\TE'
+            New-Item -ItemType Directory -Path $tempPath -ErrorAction SilentlyContinue | Out-Null
+            New-Item -ItemType Directory -Path $toolPath -ErrorAction SilentlyContinue | Out-Null
+
+            Write-Host "##[debug]Downloading Tabular Editor binaries..."
+            $teUrl = "https://github.com/TabularEditor/TabularEditor/releases/latest/download/TabularEditor.Portable.zip"
+            $teZip = Join-Path $tempPath 'TabularEditor.zip'
+            Invoke-WebRequest -Uri $teUrl -OutFile $teZip
+            Expand-Archive -Path $teZip -DestinationPath $toolPath -Force
+
+            Write-Host "##[debug]Downloading default BPA rules..."
+            $rulesUrl = "https://raw.githubusercontent.com/microsoft/Analysis-Services/master/BestPracticeRules/BPARules.json"
+            $rulesFile = Join-Path $tempPath 'Rules-Dataset.json'
+            Invoke-WebRequest -Uri $rulesUrl -OutFile $rulesFile
+
+      # 4) Run Tabular Editor's BPA on each determined model file.
+      - task: PowerShell@2
+        displayName: 'Run Dataset Rules'
+        condition: and(succeeded(), ne(variables['DatasetFiles'], 'NoFiles'))
+        inputs:
+          targetType: inline
+          script: |
+            $path = "$(Build.SourcesDirectory)"
+            $tempPath = Join-Path $path '_temp'
+            $toolPath = Join-Path $path '_tools\TE\TabularEditor.exe'
+            $rulesPath = Join-Path $tempPath 'Rules-Dataset.json'
+            $datasetFiles = "$(DatasetFiles)" -split ';'
+            if (!$datasetFiles -or $datasetFiles -eq "NoFiles") {
+              Write-Host "No changed dataset files to process."
+              exit 0
+            }
+            foreach ($file in $datasetFiles) {
+                $fullPath = Join-Path $path $file
+                if (Test-Path $fullPath) {
+                    Write-Host "##[group]Running BPA for: '$fullPath'"
+                    Start-Process -FilePath $toolPath -ArgumentList """$fullPath"" -A ""$rulesPath"" -V" -NoNewWindow -Wait
+                    Write-Host "##[endgroup]"
+                }
+                else {
+                    Write-Warning "File not found: $fullPath"
+                }
+            }

@@ -1,0 +1,74 @@
+trigger:
+  branches:
+    exclude:
+      - main
+  paths:
+    include:
+      - '**/*.bim'
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - '**/*.bim'
+
+pool:
+  vmImage: 'windows-latest'
+
+stages:
+- stage: Build
+  jobs:
+  - job: Build_Datasets
+    steps:
+      - checkout: self
+        path: 'self'
+      - task: PowerShell@2
+        displayName: 'Download Tabular Editor'
+        inputs:
+          targetType: inline
+          script: |
+            $path = "$(Build.SourcesDirectory)"
+            $tempPath = "$path\_temp"
+            $toolPath = "$path\_tools\TE"
+            New-Item -ItemType Directory -Path $tempPath -ErrorAction SilentlyContinue | Out-Null
+              
+            Write-Host "##[debug]Downloading Tabular Editor binaries"
+            $downloadUrl = "https://github.com/TabularEditor/TabularEditor/releases/latest/download/TabularEditor.Portable.zip"
+            $zipFile = "$tempPath\TabularEditor.zip"
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $zipFile
+            Expand-Archive -Path $zipFile -DestinationPath $toolPath -Force
+
+      - task: PowerShell@2
+        displayName: 'Run Dataset Rules'
+        inputs:
+          targetType: inline
+          script: |
+            $path = "$(Build.SourcesDirectory)"
+            $toolPath = "$path\_Tools\TE\TabularEditor.exe"
+            $rulesPath = "$path\BPARules\bparules.json"
+      
+            # Verify that your custom rules file exists
+            if (!(Test-Path $rulesPath))
+            {
+                Write-Host "ERROR: Custom rules file not found at $rulesPath"
+                exit 1
+            }
+      
+            # Search for .bim files recursively within the repository
+            $bimFiles = Get-ChildItem -Path $path -Recurse -Filter *.bim
+      
+            if ($bimFiles.Count -eq 0)
+            {
+                Write-Host "No .bim files found in the repository."
+                exit 0
+            }
+      
+            foreach ($file in $bimFiles)
+            {
+                $itemPath = $file.FullName
+                Write-Host "##[group]Running rules for: '$itemPath'"
+                Start-Process -FilePath "$toolPath" -ArgumentList """$itemPath"" -A ""$rulesPath"" -V" -NoNewWindow -Wait
+                Write-Host "##[endgroup]"
+            }
