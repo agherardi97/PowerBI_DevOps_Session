@@ -1,3 +1,6 @@
+DISCLAIMER: the .yaml files I'm using to run the pipelines were generated using Claude Code, corrected by me and thoroughly tested to make sure they work in different scenarios. However, there might be more efficient ways to do what they are doing. If you notice some possible improvements, let me know and I'll be happy to integrate them.
+
+
 # DevOps for Power BI: Ensuring Best Practices Compliance
 
 > Automated validation for Power BI Semantic Models and Reports using Tabular Editor BPA and PBI Inspector v2
