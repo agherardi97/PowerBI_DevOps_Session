@@ -1,0 +1,153 @@
+trigger: none
+pr: none
+
+variables:
+  - group: 'PowerBI-Rules-Paths'
+
+pool:
+  vmImage: 'windows-latest'
+
+stages:
+- stage: Build
+  displayName: 'Build and Inspect All Reports'
+  jobs:
+  - job: Build_Reports
+    displayName: 'Inspect All Reports'
+    steps:
+      - checkout: self
+        path: 'self'
+
+      - task: PowerShell@2
+        displayName: 'Download PBI Inspector'
+        inputs:
+          targetType: inline
+          script: |
+            $path = "$(Build.SourcesDirectory)"
+            $tempPath = Join-Path $path '_temp'
+            $inspectorPath = Join-Path $path '_tools\PBIInspector'
+            New-Item -ItemType Directory -Path $tempPath -ErrorAction SilentlyContinue | Out-Null
+            New-Item -ItemType Directory -Path $inspectorPath -ErrorAction SilentlyContinue | Out-Null
+
+            Write-Host "##[debug]Downloading PBI Inspector CLI..."
+            $downloadUrl = "https://github.com/NatVanG/PBI-InspectorV2/releases/latest/download/win-x64-CLI.zip"
+            $zipFile = Join-Path $tempPath 'PBIXInspector.zip'
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $zipFile
+            Expand-Archive -Path $zipFile -DestinationPath $inspectorPath -Force
+
+      - task: UseDotNet@2
+        displayName: 'Install .NET 8.0 Runtime'
+        inputs:
+          packageType: 'runtime'
+          version: '8.0.x'
+
+      - task: PowerShell@2
+        displayName: 'Verify Rule Set File'
+        inputs:
+          targetType: inline
+          script: |
+            $path = "$(Build.SourcesDirectory)"
+            $ruleSetFile = Join-Path $path "$(pbi_insp_v2_standard_rules)"
+            if (!(Test-Path $ruleSetFile)) {
+              Write-Error "Base rule set file not found at $ruleSetFile"
+              exit 1
+            }
+            Write-Host "Using base rule set: $ruleSetFile"
+
+      - task: PowerShell@2
+        displayName: 'Run Report Rules with Detailed Output'
+        inputs:
+          targetType: inline
+          script: |
+            $path = "$(Build.SourcesDirectory)"
+            $toolPath = Join-Path $path "_tools\PBIInspector\win-x64\CLI\PBIRInspectorCLI.exe"
+            $rulesPath = Join-Path $path "$(pbi_insp_v2_standard_rules)"
+
+            if (!(Test-Path $rulesPath)) {
+                Write-Error "Base rule set file not found at $rulesPath"
+                exit 1
+            }
+
+            if (!(Test-Path $toolPath)) {
+                Write-Error "PBI Inspector CLI not found at $toolPath"
+                exit 1
+            }
+
+            # Find all Power BI report files (.pbir)
+            $reportFolders = Get-ChildItem -Path $path -Recurse -Include *.pbir -ErrorAction SilentlyContinue
+
+            if ($reportFolders.Count -eq 0) {
+                Write-Host "##[warning]No Power BI report files (.pbir) found in the repository."
+                exit 0
+            }
+
+            Write-Host "##[section]Found $($reportFolders.Count) report(s) to inspect"
+            Write-Host ""
+
+            $allResults = @()
+            $failedReports = 0
+            
+            foreach ($reportFolder in $reportFolders) {
+                $reportPath = $reportFolder.Directory.FullName
+                $reportName = $reportFolder.Directory.Name
+                
+                Write-Host "##[group]Inspecting: $reportName"
+                Write-Host "##[section]Report Path: $reportPath"
+                Write-Host ""
+                
+                # Run PBI Inspector with both ADO and Console formats
+                $arguments = "-pbipreport `"$reportPath`" -rules `"$rulesPath`" -formats ADO,Console"
+                Write-Host "##[debug]Executing: $toolPath $arguments"
+                Write-Host ""
+                
+                # Capture output
+                $output = & $toolPath -pbipreport "$reportPath" -rules "$rulesPath" -formats "Console" 2>&1
+                
+                # Display the output
+                Write-Host "##[section]Inspection Results:"
+                Write-Host "----------------------------------------"
+                $output | ForEach-Object {
+                    $line = $_.ToString()
+                    
+                    # Color code different types of messages
+                    if ($line -match "PASS|Passed|✓") {
+                        Write-Host "##[debug]$line"
+                    }
+                    elseif ($line -match "FAIL|Failed|✗|ERROR") {
+                        Write-Host "##[error]$line"
+                    }
+                    elseif ($line -match "WARN|Warning|⚠") {
+                        Write-Host "##[warning]$line"
+                    }
+                    else {
+                        Write-Host $line
+                    }
+                }
+                Write-Host "----------------------------------------"
+                Write-Host ""
+                
+                # Run again with ADO format for pipeline integration
+                $process = Start-Process -FilePath $toolPath -ArgumentList "-pbipreport `"$reportPath`" -rules `"$rulesPath`" -formats ADO" -NoNewWindow -Wait -PassThru
+                
+                if ($process.ExitCode -ne 0) {
+                    Write-Host "##[error]✗ Validation FAILED for: $reportName"
+                    $failedReports++
+                } else {
+                    Write-Host "##[section]✓ Validation PASSED for: $reportName"
+                }
+                
+                Write-Host "##[endgroup]"
+                Write-Host ""
+            }
+
+            Write-Host "##[section]================================"
+            Write-Host "##[section]Inspection Summary"
+            Write-Host "##[section]================================"
+            Write-Host "##[section]Total reports: $($reportFolders.Count)"
+            Write-Host "##[section]Passed: $($reportFolders.Count - $failedReports)"
+            Write-Host "##[section]Failed: $failedReports"
+            Write-Host "##[section]================================"
+            
+            if ($failedReports -gt 0) {
+                Write-Error "$failedReports report(s) failed validation"
+                exit 1
+            }
