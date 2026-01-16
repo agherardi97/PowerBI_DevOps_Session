@@ -1,5 +1,9 @@
 DISCLAIMER: the .yaml files I'm using to run the pipelines were generated using Claude Code, corrected by me and thoroughly tested to make sure they work in different scenarios. However, there might be more efficient ways to do what they are doing. If you notice some possible improvements, let me know and I'll be happy to integrate them.
 
+These instructions are not meant to be exhaustive, as I haven't explained how to create an azure repo, what is a .pbip file for Power BI, and many other things. This is intended for people that have followed the session and want to experiment on their own.
+
+Also, I do not own anything related to Tabular Editor and PBI Inspector. I have linked the repositories of the owners of these tools at the end of this file.
+Feel free to contact me for any issue you find while implementing this.
 
 # DevOps for Power BI: Ensuring Best Practices Compliance
 
@@ -82,20 +86,8 @@ Edit `pbi_insp_v2_standard_rules.json`:
 
 ---
 
-## 💡 Implementation Tips
-
-⚠️ **Start with warnings, not errors!**
-
-1. Deploy with all rules as warnings
-2. Fix major violations in existing files
-3. Gradually make rules mandatory
-4. Get team buy-in before enforcing
-
----
-
 ## 📚 Resources
 
-- 📄 [Session Slides](CTTT_2026_Alessandro_Gherardi_Slide_Deck.pdf)
 - 📖 [Tabular Editor BPA Docs](https://docs.tabulareditor.com/te2/Best-Practice-Analyzer.html)
 - 🔧 [PBI Inspector V2 GitHub](https://github.com/NatVanG/PBI-InspectorV2)
 - 💡 [Rui Romano's DevOps Resources](https://github.com/RuiRomano)
